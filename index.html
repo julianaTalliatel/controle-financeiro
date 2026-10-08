@@ -75,6 +75,14 @@
 
     <div class="card">
       <div class="card-title">
+        <h2>Gastos por categoria</h2>
+        <span class="hint">deste mês</span>
+      </div>
+      <div id="categoryBreakdownWrap"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">
         <h2>Gasto por grupo</h2>
         <span class="hint">toque para abrir</span>
       </div>
@@ -93,7 +101,7 @@
         <button class="secondary-btn" id="backupBtn">Exportar backup</button>
         <label class="secondary-btn" style="text-align:center;cursor:pointer;">
           Importar backup
-          <input type="file" id="restoreInput" accept="application/json" style="display:none;">
+          <input type="file" id="restoreInput" accept="application/json,.json,text/plain,.txt" style="display:none;">
         </label>
       </div>
       <button class="link-btn" id="reportBtn" style="margin-top:10px;">Gerar relatório do mês (PDF)</button>

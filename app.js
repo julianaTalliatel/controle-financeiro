@@ -307,6 +307,7 @@ function renderDashboard() {
 
   renderExtras();
   renderDonut(expense);
+  renderCategoryBreakdown(expense);
   renderGroupCards();
   renderHistory();
 }
@@ -378,6 +379,57 @@ function renderDonut(expenseTotal) {
     </div>
   `;
   wrap.appendChild(row);
+}
+
+/* Gastos por categoria (mês atual): soma o valor de cada item pela categoria
+   dele. Itens sem categoria entram em "Sem categoria". */
+function renderCategoryBreakdown(expenseTotal) {
+  const wrap = document.getElementById("categoryBreakdownWrap");
+  if (!wrap) return;
+  wrap.innerHTML = "";
+
+  if (cache.categories.length === 0) {
+    wrap.innerHTML = `<p class="empty-hint">Nenhuma categoria criada ainda. Crie na aba Editar para ver os gastos por categoria.</p>`;
+    return;
+  }
+
+  const totals = new Map();
+  let semCategoria = 0;
+  cache.items.forEach((it) => {
+    const v = getValue(it.id, currentYM) || 0;
+    if (v <= 0) return;
+    if (it.categoryId && cache.categories.some((c) => c.id === it.categoryId)) {
+      totals.set(it.categoryId, (totals.get(it.categoryId) || 0) + v);
+    } else {
+      semCategoria += v;
+    }
+  });
+
+  const rows = cache.categories
+    .map((c) => ({ name: c.name, color: c.color, total: totals.get(c.id) || 0 }))
+    .filter((r) => r.total > 0);
+  if (semCategoria > 0) rows.push({ name: "Sem categoria", color: "#6b5c70", total: semCategoria });
+  rows.sort((a, b) => b.total - a.total);
+
+  if (rows.length === 0) {
+    wrap.innerHTML = `<p class="empty-hint">Nenhum gasto lançado neste mês ainda.</p>`;
+    return;
+  }
+
+  const totalGeral = expenseTotal > 0 ? expenseTotal : rows.reduce((s, r) => s + r.total, 0);
+  rows.forEach((r) => {
+    const pct = totalGeral > 0 ? (r.total / totalGeral) * 100 : 0;
+    const row = document.createElement("div");
+    row.className = "catbar-row";
+    row.innerHTML = `
+      <div class="catbar-top">
+        <span class="catbar-name"><span class="legend-dot" style="background:${r.color}"></span>${escapeHtml(r.name)}<span class="catbar-pct">${pct.toFixed(1).replace(".", ",")}%</span></span>
+        <span class="catbar-value">${fmtMoney(r.total)}</span>
+      </div>
+      <div class="catbar-track"><div class="catbar-fill" style="width:${Math.max(pct, 1).toFixed(1)}%;background:${r.color}"></div></div>
+    `;
+    wrap.appendChild(row);
+  });
 }
 
 function renderGroupCards() {
@@ -561,6 +613,7 @@ function updateTotalsLive() {
   });
 
   renderDonut(expense);
+  renderCategoryBreakdown(expense);
   renderGroupCards();
 }
 
@@ -1122,22 +1175,65 @@ function exportReport() {
 
 /* ---------------- Backup / restore ---------------- */
 
+function downloadBackupFile(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+  toast("Backup exportado");
+}
+
+/* Só usado quando o aparelho não consegue abrir o menu de compartilhar.
+   Nunca baixa sozinho: a pessoa precisa tocar em "Baixar arquivo". */
+function openBackupFallbackModal(blob, filename) {
+  openModal(
+    "Compartilhar backup",
+    `<p style="color:var(--muted);font-size:0.88rem;line-height:1.5;">Este aparelho ou navegador não abriu o menu de compartilhar. Se quiser, toque em "Baixar arquivo" para salvar o backup manualmente.</p>`,
+    () => { downloadBackupFile(blob, filename); },
+    { confirmLabel: "Baixar arquivo" }
+  );
+}
+
+/* Ao tocar em "Exportar backup" abre o menu de compartilhar do celular
+   (Arquivos, Drive, WhatsApp, e-mail...) e a pessoa escolhe o destino. */
 function exportBackup() {
   const payload = {
     app: "controle-financeiro",
     exportedAt: new Date().toISOString(),
     dados: cache
   };
-  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `controle-financeiro-backup-${ymKey(new Date())}.json`;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
-  toast("Backup exportado");
+  const text = JSON.stringify(payload, null, 2);
+  const base = `controle-financeiro-backup-${ymKey(new Date())}`;
+  const blob = new Blob([text], { type: "application/json" });
+
+  // Alguns navegadores (ex.: Chrome no Android) não aceitam compartilhar .json;
+  // nesse caso tenta o mesmo conteúdo como .txt (o "Importar backup" aceita os dois).
+  let file = null;
+  try {
+    if (navigator.share && navigator.canShare) {
+      const candidatos = [
+        new File([text], `${base}.json`, { type: "application/json" }),
+        new File([text], `${base}.txt`, { type: "text/plain" })
+      ];
+      file = candidatos.find((f) => navigator.canShare({ files: [f] })) || null;
+    }
+  } catch (e) { file = null; }
+
+  if (!file) {
+    openBackupFallbackModal(blob, `${base}.json`);
+    return;
+  }
+
+  navigator.share({ files: [file], title: "Backup — Controle Financeiro" })
+    .then(() => toast("Backup compartilhado"))
+    .catch((err) => {
+      if (err && err.name === "AbortError") return; // a pessoa fechou o menu
+      openBackupFallbackModal(blob, `${base}.json`);
+    });
 }
 
 function importBackup(file) {
